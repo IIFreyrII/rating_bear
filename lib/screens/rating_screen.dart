@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_rating_bar/flutter_rating_bar.dart';
 import 'package:rive/rive.dart';
@@ -11,57 +10,16 @@ class RatingBear extends StatefulWidget {
 }
 
 class _RatingBearState extends State<RatingBear> {
+  Artboard?
+  _artboard; // Guardar referencia al artboard para manipular el controlador
   StateMachineController? controller;
   SMITrigger? trigSuccess;
   SMITrigger? trigFail;
-  SMITrigger? trigNeutral;
-  SMITrigger? reset;
+  SMITrigger? trigNeutral; // Trigger para estado neutral
+  SMITrigger? reset; // Trigger para resetear/cancelar animaciones
 
   double _currentRating = 0;
   bool _hasRated = false;
-  Artboard? _artboard;
-
-  // Timer para manejar la cancelación de animaciones
-  Timer? _animationTimer;
-
-  @override
-  void dispose() {
-    _animationTimer?.cancel();
-    super.dispose();
-  }
-
-  void _cancelPreviousAnimation() {
-    // Cancelar cualquier timer anterior
-    _animationTimer?.cancel();
-
-    // Forzar reset de la animación
-    reset?.fire();
-
-    // Pequeña pausa para asegurar el reset
-    Future.delayed(const Duration(milliseconds: 16), () {
-      // Opcional: agregar un trigger de idle o estado base si existe
-    });
-  }
-
-  void _triggerAnimation(double rating) {
-    _cancelPreviousAnimation();
-
-    // Usar un timer para ejecutar la nueva animación después del reset
-    _animationTimer = Timer(const Duration(milliseconds: 32), () {
-      if (rating <= 2) {
-        trigFail?.fire();
-      } else if (rating == 3) {
-        if (trigNeutral != null) {
-          trigNeutral?.fire();
-        } else {
-          // Si no hay trigger neutral, mantener estado base
-          reset?.fire();
-        }
-      } else {
-        trigSuccess?.fire();
-      }
-    });
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -77,13 +35,31 @@ class _RatingBearState extends State<RatingBear> {
               SizedBox(
                 width: size.width,
                 height: 300,
-                child: _artboard != null
-                    ? Rive(artboard: _artboard!, fit: BoxFit.contain)
-                    : RiveAnimation.asset(
-                        'assets/animated_login_character.riv',
-                        stateMachines: ["Login Machine"],
-                        onInit: _onRiveInit,
-                      ),
+                child: RiveAnimation.asset(
+                  'assets/animated_login_character.riv',
+                  stateMachines: ["Login Machine"],
+                  onInit: (artboard) {
+                    _artboard = artboard;
+                    controller = StateMachineController.fromArtboard(
+                      artboard,
+                      "Login Machine",
+                    );
+                    if (controller == null) return;
+                    artboard.addController(controller!);
+                    trigSuccess = controller!.findSMI('trigSuccess');
+                    trigFail = controller!.findSMI('trigFail');
+                    trigNeutral = controller!.findSMI('trigNeutral');
+                    reset = controller!.findSMI('reset');
+
+                    // Si no existe trigNeutral, buscar alternativas
+                    if (trigNeutral == null) {
+                      trigNeutral = controller!.findSMI('neutral');
+                    }
+                    if (trigNeutral == null) {
+                      trigNeutral = controller!.findSMI('idle');
+                    }
+                  },
+                ),
               ),
 
               const SizedBox(height: 10),
@@ -134,13 +110,58 @@ class _RatingBearState extends State<RatingBear> {
                 itemSize: 40,
                 itemBuilder: (context, _) =>
                     const Icon(Icons.star, color: Colors.amber),
-                onRatingUpdate: (rating) {
+                onRatingUpdate: (rating) async {
                   setState(() {
                     _currentRating = rating;
                     _hasRated = true;
                   });
 
-                  _triggerAnimation(rating);
+                  // Determinar el trigger a usar
+                  int? nextAnim;
+                  if (rating <= 2) {
+                    nextAnim = 1; // fail
+                  } else if (rating == 3) {
+                    nextAnim = 2; // neutral
+                  } else if (rating > 3) {
+                    nextAnim = 3; // success
+                  }
+
+                  // Forzar reinicio del controlador para cancelar animación previa
+                  if (_artboard != null && controller != null) {
+                    _artboard!.removeController(controller!);
+                    controller = StateMachineController.fromArtboard(
+                      _artboard!,
+                      "Login Machine",
+                    );
+                    if (controller != null) {
+                      _artboard!.addController(controller!);
+                      trigSuccess = controller!.findSMI('trigSuccess');
+                      trigFail = controller!.findSMI('trigFail');
+                      trigNeutral = controller!.findSMI('trigNeutral');
+                      reset = controller!.findSMI('reset');
+                      if (trigNeutral == null) {
+                        trigNeutral = controller!.findSMI('neutral');
+                      }
+                      if (trigNeutral == null) {
+                        trigNeutral = controller!.findSMI('idle');
+                      }
+                    }
+                  }
+                  await Future.delayed(const Duration(milliseconds: 10));
+
+                  if (nextAnim == 1) {
+                    trigFail?.fire();
+                  } else if (nextAnim == 2) {
+                    if (trigNeutral != null) {
+                      trigNeutral?.fire();
+                    } else {
+                      reset?.fire();
+                    }
+                  } else if (nextAnim == 3) {
+                    trigSuccess?.fire();
+                  }
+
+                  // _lastAnimation eliminado
                 },
               ),
 
@@ -166,6 +187,7 @@ class _RatingBearState extends State<RatingBear> {
                 child: ElevatedButton(
                   onPressed: _hasRated
                       ? () {
+                          // Acción al enviar el rating
                           ScaffoldMessenger.of(context).showSnackBar(
                             SnackBar(
                               content: Text(
@@ -197,7 +219,7 @@ class _RatingBearState extends State<RatingBear> {
               SizedBox(
                 width: double.infinity,
                 child: TextButton(
-                  onPressed: null,
+                  onPressed: null, // Sin función
                   style: TextButton.styleFrom(
                     foregroundColor: Colors.grey[700],
                     padding: const EdgeInsets.symmetric(vertical: 16),
@@ -213,36 +235,5 @@ class _RatingBearState extends State<RatingBear> {
         ),
       ),
     );
-  }
-
-  void _onRiveInit(Artboard artboard) {
-    controller = StateMachineController.fromArtboard(artboard, "Login Machine");
-    if (controller == null) return;
-
-    artboard.addController(controller!);
-    setState(() {
-      _artboard = artboard;
-    });
-
-    // Buscar todos los posibles triggers
-    trigSuccess = controller!.findSMI('trigSuccess');
-    trigFail = controller!.findSMI('trigFail');
-    trigNeutral = controller!.findSMI('trigNeutral');
-    reset = controller!.findSMI('reset');
-
-    // Si no encuentra reset, buscar alternativas
-    if (reset == null) {
-      reset = controller!.findSMI('trigReset');
-    }
-    if (reset == null) {
-      reset = controller!.findSMI('idle');
-    }
-
-    // Debug: imprimir triggers encontrados
-    print("Triggers encontrados:");
-    print("Success: $trigSuccess");
-    print("Fail: $trigFail");
-    print("Neutral: $trigNeutral");
-    print("Reset: $reset");
   }
 }
