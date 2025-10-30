@@ -1,6 +1,7 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter_rating_bar/flutter_rating_bar.dart';
 import 'package:rive/rive.dart';
-import 'package:flutter_rating_stars/flutter_rating_stars.dart';
 
 class RatingBear extends StatefulWidget {
   const RatingBear({super.key});
@@ -10,174 +11,238 @@ class RatingBear extends StatefulWidget {
 }
 
 class _RatingBearState extends State<RatingBear> {
-  double _rating = 1;
-  late RiveAnimationController _controller;
-  Artboard? _riveArtboard;
-  late StateMachineController? _stateMachineController;
-  SMIInput<double>? _starsInput;
-  SMITrigger? _failTrigger;
-  SMITrigger? _neutralTrigger;
-  SMITrigger? _successTrigger;
+  StateMachineController? controller;
+  SMITrigger? trigSuccess;
+  SMITrigger? trigFail;
+  SMITrigger? trigNeutral;
+  SMITrigger? reset;
+
+  double _currentRating = 0;
+  bool _hasRated = false;
+  Artboard? _artboard;
+
+  // Timer para manejar la cancelación de animaciones
+  Timer? _animationTimer;
 
   @override
-  void initState() {
-    super.initState();
-    _controller = SimpleAnimation('Idle');
-    _loadRiveFile();
+  void dispose() {
+    _animationTimer?.cancel();
+    super.dispose();
   }
 
-  void _loadRiveFile() async {
-    final data = await RiveFile.asset('assets/animated_login_character.riv');
-    final artboard = data.mainArtboard;
-    final controller = StateMachineController.fromArtboard(
-      artboard,
-      'State Machine 1', // Asegúrate de que el nombre coincide con el de tu archivo .riv
-    );
-    if (controller != null) {
-      artboard.addController(controller);
-      _stateMachineController = controller;
-      _starsInput = controller.findInput<double>('stars');
-      _failTrigger = controller.findInput<bool>('fail') as SMITrigger?;
-      _neutralTrigger = controller.findInput<bool>('neutral') as SMITrigger?;
-      _successTrigger = controller.findInput<bool>('success') as SMITrigger?;
-      // Inicializar el estado
-      _updateAnimation(_rating);
-    }
-    setState(() {
-      _riveArtboard = artboard;
+  void _cancelPreviousAnimation() {
+    // Cancelar cualquier timer anterior
+    _animationTimer?.cancel();
+
+    // Forzar reset de la animación
+    reset?.fire();
+
+    // Pequeña pausa para asegurar el reset
+    Future.delayed(const Duration(milliseconds: 16), () {
+      // Opcional: agregar un trigger de idle o estado base si existe
     });
   }
 
-  void _updateAnimation(double rating) {
-    if (_starsInput != null) {
-      _starsInput!.value = rating;
-    }
-    // Cancelar animaciones previas
-    _failTrigger?.reset();
-    _neutralTrigger?.reset();
-    _successTrigger?.reset();
+  void _triggerAnimation(double rating) {
+    _cancelPreviousAnimation();
 
-    if (rating <= 2) {
-      _failTrigger?.fire();
-    } else if (rating == 3) {
-      _neutralTrigger?.fire();
-    } else if (rating >= 4) {
-      _successTrigger?.fire();
-    }
+    // Usar un timer para ejecutar la nueva animación después del reset
+    _animationTimer = Timer(const Duration(milliseconds: 32), () {
+      if (rating <= 2) {
+        trigFail?.fire();
+      } else if (rating == 3) {
+        if (trigNeutral != null) {
+          trigNeutral?.fire();
+        } else {
+          // Si no hay trigger neutral, mantener estado base
+          reset?.fire();
+        }
+      } else {
+        trigSuccess?.fire();
+      }
+    });
   }
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
-        padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(24),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black12,
-              blurRadius: 24,
-              offset: Offset(0, 12),
-            )
-          ],
-        ),
-        width: 340,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (_riveArtboard != null)
+    final Size size = MediaQuery.of(context).size;
+    return Scaffold(
+      backgroundColor: Colors.white,
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: Column(
+            children: [
+              // Animación del oso
               SizedBox(
-                height: 160,
-                child: Rive(
-                  artboard: _riveArtboard!,
-                  fit: BoxFit.contain,
-                ),
-              )
-            else
+                width: size.width,
+                height: 300,
+                child: _artboard != null
+                    ? Rive(artboard: _artboard!, fit: BoxFit.contain)
+                    : RiveAnimation.asset(
+                        'assets/animated_login_character.riv',
+                        stateMachines: ["Login Machine"],
+                        onInit: _onRiveInit,
+                      ),
+              ),
+
+              const SizedBox(height: 10),
+
+              // Título principal
               const SizedBox(
-                height: 160,
-                child: Center(child: CircularProgressIndicator()),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      "How was your experience?",
+                      style: TextStyle(
+                        color: Colors.black,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 24,
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            const SizedBox(height: 16),
-            const Text(
-              "Enjoying Sounter?",
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                fontSize: 22,
-                color: Color(0xff2c3550),
+
+              const SizedBox(height: 16),
+
+              // Subtítulo
+              const SizedBox(
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      "Please share your opinion about the product",
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: Colors.grey, fontSize: 16),
+                    ),
+                  ],
+                ),
               ),
-            ),
-            const SizedBox(height: 12),
-            const Text(
-              "With how many stars do you rate your experience.\nTap a star to rate!",
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 16,
-                color: Color(0xff6b7588),
-              ),
-            ),
-            const SizedBox(height: 14),
-            IgnorePointer(
-              ignoring: false,
-              child: RatingStars(
-                value: _rating,
-                onValueChanged: (v) {
+
+              const SizedBox(height: 32),
+
+              // Rating Bar
+              RatingBar.builder(
+                initialRating: _currentRating,
+                minRating: 0,
+                direction: Axis.horizontal,
+                allowHalfRating: false,
+                itemCount: 5,
+                itemPadding: const EdgeInsets.symmetric(horizontal: 8.0),
+                itemSize: 40,
+                itemBuilder: (context, _) =>
+                    const Icon(Icons.star, color: Colors.amber),
+                onRatingUpdate: (rating) {
                   setState(() {
-                    _rating = v;
-                    _updateAnimation(v);
+                    _currentRating = rating;
+                    _hasRated = true;
                   });
+
+                  _triggerAnimation(rating);
                 },
-                starCount: 5,
-                starSize: 38,
-                valueLabelVisibility: false,
-                starColor: const Color(0xfff9c755),
-                starOffColor: const Color(0xffd3d6db),
               ),
-            ),
-            const SizedBox(height: 20),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xff6366f1),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12)
-                  ),
-                  padding: const EdgeInsets.symmetric(vertical: 16)
-                ),
-                onPressed: () {
-                  // Acción Rate Now
-                },
-                child: const Text(
-                  "Rate now",
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16,
-                    color: Colors.white
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(height: 10),
-            TextButton(
-              onPressed: () {
-                // Acción No Thanks
-              },
-              child: const Text(
-                "NO THANKS",
+
+              const SizedBox(height: 16),
+
+              // Texto que muestra el rating actual
+              Text(
+                _currentRating == 0
+                    ? "Select your rating"
+                    : "Your rating: $_currentRating",
                 style: TextStyle(
-                  color: Color(0xff6366f1),
-                  fontWeight: FontWeight.bold,
-                  fontSize: 15,
-                  letterSpacing: 1.1
+                  fontSize: 16,
+                  color: _currentRating == 0 ? Colors.grey : Colors.blue,
+                  fontWeight: FontWeight.w500,
                 ),
               ),
-            ),
-          ],
+
+              const SizedBox(height: 40),
+
+              // Botón Rate Now
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: _hasRated
+                      ? () {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                "Thank you for your $_currentRating star rating!",
+                              ),
+                              backgroundColor: Colors.green,
+                            ),
+                          );
+                        }
+                      : null,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blue,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  child: const Text(
+                    "RATE NOW",
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 16),
+
+              // Botón No Thanks
+              SizedBox(
+                width: double.infinity,
+                child: TextButton(
+                  onPressed: null,
+                  style: TextButton.styleFrom(
+                    foregroundColor: Colors.grey[700],
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                  ),
+                  child: const Text(
+                    "NO THANKS",
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
+  }
+
+  void _onRiveInit(Artboard artboard) {
+    controller = StateMachineController.fromArtboard(artboard, "Login Machine");
+    if (controller == null) return;
+
+    artboard.addController(controller!);
+    setState(() {
+      _artboard = artboard;
+    });
+
+    // Buscar todos los posibles triggers
+    trigSuccess = controller!.findSMI('trigSuccess');
+    trigFail = controller!.findSMI('trigFail');
+    trigNeutral = controller!.findSMI('trigNeutral');
+    reset = controller!.findSMI('reset');
+
+    // Si no encuentra reset, buscar alternativas
+    if (reset == null) {
+      reset = controller!.findSMI('trigReset');
+    }
+    if (reset == null) {
+      reset = controller!.findSMI('idle');
+    }
+
+    // Debug: imprimir triggers encontrados
+    print("Triggers encontrados:");
+    print("Success: $trigSuccess");
+    print("Fail: $trigFail");
+    print("Neutral: $trigNeutral");
+    print("Reset: $reset");
   }
 }
